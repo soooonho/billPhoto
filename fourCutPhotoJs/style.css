@@ -197,11 +197,20 @@ body {
   z-index: 20;
   position: fixed;
   display: none;
+  bottom: 12px; /* 바닥에서 40px 띄움 */
+  left: 50%;
+  transform: translateX(-50%); /* 정확히 중앙 정렬 */
+
+  display: flex; /* 버튼들을 가로로 배치 */
+  gap: 20px; /* 버튼 사이 간격 */
+  z-index: 100; /* 사진보다 무조건 위로 */
+
+  width: auto;
 }
 #nextBtn {
   padding: 15px 50px;
   font-size: 18px;
-  background: #007bff;
+  background: #8d5c3c;
   color: white;
   border: none;
   border-radius: 5px;
