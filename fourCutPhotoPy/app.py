@@ -16,6 +16,7 @@ CORS(app) # 모든 도메인에서의 접근을 허용
 FRAME_PATH = 'frame.png'
 images=[]
 selected_images=[]
+professor=Image.open("professor.png").convert("RGBA")
 def pillow_to_base64(img):
     buffered = io.BytesIO()
     # 이미지를 PNG 포맷으로 메모리에 저장
@@ -33,7 +34,9 @@ def upload_image():
         data = base64.b64decode(encoded)
         
         img = Image.open(io.BytesIO(data)).convert("RGB")
-        
+        #640*480
+        img.paste(professor, (0, 0), professor)
+        img.save("texture_overlay.png")
         # 4. 이제 PIL 객체가 리스트에 들어갑니다.
         images.append(img)
     processed_images=[]

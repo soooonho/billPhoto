@@ -6,7 +6,7 @@ const path = require('path');
 app.use(express.static(__dirname));
 
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'index2.html'));
+    res.sendFile(path.join(__dirname, 'index.html'));
 });
 
 // 노트북의 모든 네트워크 인터페이스(0.0.0.0)에서 접속 허용

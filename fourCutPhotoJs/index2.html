@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Atkinson Dither 실시간 튜너</title>
+    <style>
+      body {
+        font-family: sans-serif;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        background: #f0f0f0;
+        padding: 20px;
+      }
+      .container {
+        background: white;
+        padding: 20px;
+        border-radius: 12px;
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+        display: flex;
+        gap: 20px;
+      }
+      .controls {
+        display: flex;
+        flex-direction: column;
+        gap: 15px;
+        width: 300px;
+      }
+      .control-group {
+        display: flex;
+        flex-direction: column;
+      }
+      label {
+        font-size: 14px;
+        font-weight: bold;
+        margin-bottom: 5px;
+        display: flex;
+        justify-content: space-between;
+      }
+      canvas {
+        background: #eee;
+        border: 1px solid #ccc;
+        max-width: 500px;
+        height: auto;
+        image-rendering: pixelated;
+      }
+      .btn-group {
+        margin-top: 20px;
+      }
+      button {
+        padding: 10px 20px;
+        cursor: pointer;
+        border-radius: 5px;
+        border: none;
+        background: #2196f3;
+        color: white;
+        font-weight: bold;
+      }
+      button:hover {
+        background: #1976d2;
+      }
+    </style>
+  </head>
+  <body>
+    <h2>🖼️ Atkinson Dithering 실시간 조절기</h2>
+
+    <div class="container">
+      <div class="controls">
+        <div class="control-group">
+          <label>이미지 불러오기</label>
+          <input type="file" id="fileInput" accept="testImg" />
+        </div>
+        <hr />
+        <div class="control-group">
+          <label>Gamma (감마) <span id="val-gamma">1.0</span></label>
+          <input
+            type="range"
+            id="gamma"
+            min="0.1"
+            max="3.0"
+            step="0.1"
+            value="1.0"
+          />
+        </div>
+        <div class="control-group">
+          <label>Threshold (임계값) <span id="val-threshold">123</span></label>
+          <input
+            type="range"
+            id="threshold"
+            min="0"
+            max="255"
+            step="1"
+            value="123"
+          />
+        </div>
+        <div class="control-group">
+          <label>Contrast (대비) <span id="val-contrast">36</span></label>
+          <input
+            type="range"
+            id="contrast"
+            min="-100"
+            max="100"
+            step="1"
+            value="36"
+          />
+        </div>
+        <div class="control-group">
+          <label
+            >Error Scale (에러 전파) <span id="val-errScale">0.5</span></label
+          >
+          <input
+            type="range"
+            id="errScale"
+            min="0"
+            max="1.0"
+            step="0.05"
+            value="0.5"
+          />
+        </div>
+        <div class="btn-group">
+          <button id="saveBtn">이 설정으로 노트북에 저장</button>
+        </div>
+      </div>
+
+      <div>
+        <p style="margin-top: 0">결과 미리보기 (384px 최적화)</p>
+        <canvas id="resultCanvas"></canvas>
+      </div>
+    </div>
+
+    <script>
+      const fileInput = document.getElementById("fileInput");
+      const canvas = document.getElementById("resultCanvas");
+      const ctx = canvas.getContext("2d");
+      let originalImage = null;
+
+      // 슬라이더 및 값 표시 요소들
+      const params = ["gamma", "threshold", "contrast", "errScale"];
+      const inputs = {};
+      params.forEach((id) => {
+        inputs[id] = document.getElementById(id);
+        inputs[id].oninput = () => {
+          document.getElementById(`val-${id}`).innerText = inputs[id].value;
+          processImage();
+        };
+      });
+
+      // 1. 이미지 로드
+      fileInput.onchange = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          const img = new Image();
+          img.onload = () => {
+            originalImage = img;
+            processImage();
+          };
+          img.src = event.target.result;
+        };
+        reader.readAsDataURL(file);
+      };
+
+      // 2. 작성하신 디더링 알고리즘 로직
+      function buildGammaTables(gammaVal) {
+        const toLinear = new Float32Array(256);
+        for (let i = 0; i < 256; i++) {
+          const s = i / 255;
+          toLinear[i] =
+            s <= 0.04045 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+        }
+        return { toLinear };
+      }
+
+      function processImage() {
+        if (!originalImage) return;
+
+        // 프린터 폭에 맞춰 리사이징 (384px)
+        const width = 384;
+        const height = Math.floor(
+          originalImage.height * (width / originalImage.width),
+        );
+        canvas.width = width;
+        canvas.height = height;
+
+        ctx.drawImage(originalImage, 0, 0, width, height);
+
+        // 파라미터 읽기
+        const GAMMA = parseFloat(inputs.gamma.value);
+        const THRESHOLD = parseInt(inputs.threshold.value);
+        const CONTRAST = parseInt(inputs.contrast.value);
+        const ERR_SCALE = parseFloat(inputs.errScale.value);
+
+        const imgData = ctx.getImageData(0, 0, width, height);
+        const src = imgData.data;
+        const pixelCount = width * height;
+        const { toLinear } = buildGammaTables();
+
+        // 1단계: 회색조 변환 + 대비 + 감마
+        const buf = new Float32Array(pixelCount);
+        for (let i = 0; i < pixelCount; i++) {
+          const pi = i * 4;
+          let gray =
+            0.2126 * toLinear[src[pi]] * 255 +
+            0.7152 * toLinear[src[pi + 1]] * 255 +
+            0.0722 * toLinear[src[pi + 2]] * 255;
+
+          gray = gray + (gray - 128) * (CONTRAST / 100);
+          if (GAMMA !== 1.0)
+            gray = Math.pow(Math.max(0, gray) / 255, GAMMA) * 255;
+          buf[i] = Math.min(255, Math.max(0, gray));
+        }
+
+        // 2단계: Atkinson 디더링 커널
+        const KERNEL = [
+          [0, 1, 1 / 8],
+          [0, 2, 1 / 8],
+          [1, -1, 1 / 8],
+          [1, 0, 1 / 8],
+          [1, 1, 1 / 8],
+          [2, 0, 1 / 8],
+        ];
+
+        for (let y = 0; y < height; y++) {
+          for (let x = 0; x < width; x++) {
+            const i = y * width + x;
+            const old = buf[i];
+            const nw = old < THRESHOLD ? 0 : 255;
+            buf[i] = nw;
+            const err = (old - nw) * ERR_SCALE;
+
+            for (const [dy, dx, w] of KERNEL) {
+              const nx = x + dx,
+                ny = y + dy;
+              if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+                buf[ny * width + nx] = Math.min(
+                  255,
+                  Math.max(0, buf[ny * width + nx] + err * w),
+                );
+              }
+            }
+          }
+        }
+
+        // 3단계: 결과 기록
+        for (let i = 0; i < pixelCount; i++) {
+          const pi = i * 4;
+          const v = buf[i] > 128 ? 255 : 0;
+          src[pi] = src[pi + 1] = src[pi + 2] = v;
+          src[pi + 3] = 255; // 알파 채널 불투명하게
+        }
+
+        ctx.putImageData(imgData, 0, 0);
+      }
+
+      // 3. 노트북 경로 저장 (다운로드 방식)
+      document.getElementById("saveBtn").onclick = () => {
+        const link = document.createElement("a");
+        link.download = `dithered_${Date.now()}.png`;
+        link.href = canvas.toDataURL("image/png");
+        link.click();
+      };
+    </script>
+  </body>
+</html>
