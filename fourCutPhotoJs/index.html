@@ -570,15 +570,16 @@
         grid-template-rows: repeat(2, 1fr);
         gap: 8px;
         /* 세로 모드: 화면 너비 기준 */
-        width: min(640px, 90vw);
-        aspect-ratio: 3/2;
+        width: min(1000px, 70vw)!important;
+        aspect-ratio: 4/2;
+        max-height: 80vh;
       }
       @media (orientation: landscape) {
         .result-photo-grid {
+          width: 100%;
+  height: 100%;
           /* 가로 모드: 높이 기준 */
-          width: auto;
-          height: min(620px, 84vh);
-          aspect-ratio: 3/2;
+          object-fit: cover;
         }
       }
       /* 세로 모드: 2열 3행으로 전환 */
@@ -861,14 +862,27 @@
             alert("프린터가 연결되지 않았습니다.");
             return;
           }
-          const chunkSize = 100;
+          
+          // 1. 청크 크기 대폭 증가 (100 -> 256 또는 512)
+          // 대부분의 태블릿/프린터 블루투스 환경에서 256~512 바이트가 가장 안정적이면서 빠릅니다.
+          const chunkSize = 256; 
+          
           for (let i = 0; i < data.byteLength; i += chunkSize) {
             const chunk = data.slice(i, i + chunkSize);
+            
             try {
+              // 2. 무조건적인 setTimeout 딜레이 삭제 (끊김의 주범)
               await this.characteristic.writeValueWithoutResponse(chunk);
-              await new Promise((r) => setTimeout(r, 1));
-            } catch {
-              await this.characteristic.writeValue(chunk);
+            } catch (error) {
+              // 3. 브라우저의 블루투스 큐(Queue)가 꽉 차서 에러를 뱉을 때만 대처
+              try {
+                // 응답을 기다리는 안전한 방식으로 전환하여 전송
+                await this.characteristic.writeValue(chunk);
+              } catch (retryError) {
+                // 이것마저 실패하면 프린터가 아예 버퍼를 소화 못 한 상태이므로 약간 대기 후 재시도
+                await new Promise((r) => setTimeout(r, 20));
+                i -= chunkSize; // 인덱스를 뒤로 돌려 현재 청크를 다시 보내게 함
+              }
             }
           }
         }
@@ -878,6 +892,7 @@
           await this.printRaw(data);
         }
         async printImage(canvas) {
+          await printer.printRaw(new Uint8Array([0x1b, 0x40]));
           const ctx = canvas.getContext("2d");
           const width = 384;
           const height = Math.floor(canvas.height * (width / canvas.width));
@@ -1262,7 +1277,6 @@
         document
           .querySelectorAll(".photo-item")
           .forEach((el) => el.classList.remove("selected", "dimmed"));
-        selectedPhotos = [];
         selectCounter.textContent = `0 / ${albumSize} 선택됨`;
         nextBtn.classList.remove("ready");
         nextBtn.textContent = "세컷 완성 →";
@@ -1272,7 +1286,7 @@
 
         // 선택한 사진으로 인쇄용 캔버스 생성
         const imageObjects = await Promise.all(
-          capturedPhotos.slice(0, albumSize).map(
+          selectedPhotos.slice(0, albumSize).map(
             (src) =>
               new Promise((resolve) => {
                 const img = new Image();
